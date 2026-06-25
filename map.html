@@ -63,6 +63,8 @@
   .cmt{color:#334155; font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
   .right{flex:0 0 auto; text-align:right}
   .loading{color:var(--muted); font-size:13px; padding:14px 4px}
+  .src{margin-top:14px; padding-top:10px; border-top:1px solid var(--line); color:var(--muted); font-size:11px; line-height:1.6}
+  .src a{color:#2563eb} .src code{background:#f1f5f9; border-radius:4px; padding:0 4px; font-size:10px}
 
   .leaflet-popup-content{font-size:13px; line-height:1.5}
   .pp-name{font-weight:800; font-size:14px}
@@ -85,6 +87,12 @@
     <div class="summary" id="summary"></div>
 
     <ul class="roster" id="roster"><li class="loading">メンバー情報を読み込んでいます…</li></ul>
+
+    <div class="src">
+      震源・震度データ：<a href="https://www.p2pquake.net/develop/json_api_v2/" target="_blank" rel="noopener">P2P地震情報 API</a>
+      （<code>api.p2pquake.net/v2/history?codes=551</code>）<br>
+      地図：地理院タイル（国土地理院）／ 震度色は気象庁配色に準拠した目安
+    </div>
   </div>
   <div id="map"></div>
 </div>
@@ -146,6 +154,34 @@
 
   const pinLayer   = L.layerGroup().addTo(map);
   const quakeLayer = L.layerGroup().addTo(map);
+
+  // ---- 都道府県ポリゴンの震度色分け（japan.geojson をリポジトリに配置）----
+  let prefLayer = null;       // 県境ポリゴンのレイヤ
+  let curPerPrefMax = {};     // 直近地震の県別最大震度 { 県名: scale }
+  function prefNameOf(f){ const p = f.properties || {}; return p.nam_ja || p.name || p.N03_001 || ""; }
+  function styleFeature(f){
+    const s = curPerPrefMax[prefNameOf(f)];
+    return s ? { color:"#ffffff", weight:1, opacity:0.8, fillColor:shindoColor(s), fillOpacity:0.55 }
+             : { weight:0, opacity:0, fillOpacity:0 };
+  }
+  function loadGeo(){
+    fetch("./japan.geojson")
+      .then(function(r){ if(!r.ok) throw new Error("not found"); return r.json(); })
+      .then(function(geo){
+        prefLayer = L.geoJSON(geo, {
+          pane:"quakeFill", style: styleFeature,
+          onEachFeature: function(f, layer){
+            layer.on("click", function(){
+              const s = curPerPrefMax[prefNameOf(f)];
+              layer.bindPopup("<div class='pp-name'>"+esc(prefNameOf(f))+"</div>"+
+                (s ? "<div>最大"+scaleLabel(s)+"</div>" : "<div>観測なし</div>")).openPopup();
+            });
+          }
+        }).addTo(map);
+        if(Object.keys(curPerPrefMax).length) prefLayer.setStyle(styleFeature); // 既に地震取得済みなら塗る
+      })
+      .catch(function(){ console.warn("japan.geojson が読み込めません。リポジトリに配置すると県の色分けが有効になります。"); });
+  }
 
   function scaleLabel(s){ return "震度" + (SCALE[s] || "不明"); }
   function relTime(iso){
@@ -325,6 +361,8 @@
         const name = hypo.name || "不明";
         const mag  = hypo.magnitude;
         const maxS = scaleLabel(eq.maxScale);
+        const depth = hypo.depth; // km（0=ごく浅い, -1=不明）
+        const depthTxt = (depth > 0) ? "深さ約"+depth+"km" : (depth === 0 ? "ごく浅い" : "");
 
         // 震度4以上の地域を抽出
         const big = (q.points||[]).filter(function(p){ return p.scale>=40; })
@@ -339,25 +377,17 @@
             return "<span class='sl'><span class='slc' style='background:"+shindoColor(s)+"'></span>"+SCALE[s]+"</span>";
           }).join("") + "</div>";
         box.innerHTML = "<b>直近の地震</b>　"+esc(eq.time||"")+"<br>"+
-          "震源：<b>"+esc(name)+"</b>"+(mag?"（M"+esc(mag)+"）":"")+"　最大<b>"+maxS+"</b>"+
+          "震源：<b>"+esc(name)+"</b>"+(mag?"（M"+esc(mag)+"）":"")+(depthTxt?"　"+esc(depthTxt):"")+"　最大<b>"+maxS+"</b>"+
           (big.length?"<div class='areas'>震度4以上："+esc(big.join("、"))+"</div>":"")+
           legend;
 
-        // 県ごとの震度色分け：points から県別の最大震度を出し、県の代表点に震度色の丸を置く
-        const perPrefMax = {};
+        // 県ごとの震度色分け：points から県別の最大震度を出し、県ポリゴンを塗る
+        curPerPrefMax = {};
         (q.points||[]).forEach(function(p){
           if(!p.pref || typeof p.scale !== "number") return;
-          if(!(p.pref in perPrefMax) || p.scale > perPrefMax[p.pref]) perPrefMax[p.pref] = p.scale;
+          if(!(p.pref in curPerPrefMax) || p.scale > curPerPrefMax[p.pref]) curPerPrefMax[p.pref] = p.scale;
         });
-        Object.keys(perPrefMax).forEach(function(pref){
-          const c = PREF_CENTROID[pref]; if(!c) return;
-          const s = perPrefMax[pref];
-          L.circleMarker(c, {
-            pane:"quakeFill", radius: shindoRadius(s), color:"#fff", weight:1,
-            fillColor: shindoColor(s), fillOpacity:0.7
-          }).addTo(quakeLayer)
-            .bindPopup("<div class='pp-name'>"+esc(pref)+"</div><div>最大"+scaleLabel(s)+"</div>");
-        });
+        if(prefLayer) prefLayer.setStyle(styleFeature);
 
         // 震央＋影響の目安円（半径はマグニチュード基準のおおまかな目安）
         const lat = Number(hypo.latitude), lng = Number(hypo.longitude);
@@ -373,6 +403,7 @@
 
   // ---------- 起動・自動更新 ----------
   $("#refreshBtn").addEventListener("click", function(){ loadData(); loadQuake(); });
+  loadGeo();              // 県境ポリゴンを一度だけ読み込み（地震取得後に色付け）
   loadData(); loadQuake();
   setInterval(loadData, REFRESH_MS);
   setInterval(loadQuake, QUAKE_MS);
