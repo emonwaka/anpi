@@ -67,7 +67,12 @@
   .check{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;margin:4px auto 12px;font-size:34px;color:#fff;font-weight:800}
   .resultline{font-size:20px; font-weight:800; margin:2px 0}
   .resultsub{color:var(--muted); font-size:14px; margin-top:6px}
-  .again{margin-top:18px; display:inline-block; background:#0f172a; color:#fff; text-decoration:none; padding:12px 20px; border-radius:12px; font-weight:700; border:0; font:inherit; cursor:pointer}
+  .doneacts{display:flex; flex-direction:column; gap:10px; align-items:stretch; margin-top:18px}
+  .tomap{display:block; background:#2563eb; color:#fff; text-decoration:none; padding:14px 20px; border-radius:12px; font-weight:800; font:inherit; text-align:center}
+  .tomap:hover{background:#1d4ed8}
+  .tomap:focus-visible{outline:4px solid #1e293b; outline-offset:2px}
+  .again{display:block; background:#eef2f7; color:#0f172a; text-decoration:none; padding:12px 20px; border-radius:12px; font-weight:700; border:1px solid var(--line); font:inherit; cursor:pointer; text-align:center}
+  .again:hover{background:#e2e8f0}
   .again:focus-visible{outline:4px solid #1e293b; outline-offset:2px}
   .warn{background:#fff7ed; border:1px solid #fed7aa; color:#9a3412; border-radius:12px; padding:12px 14px; font-size:14px}
 </style>
@@ -115,7 +120,10 @@
       <div class="check" id="doneCheck">✓</div>
       <div class="resultline" id="doneLine">送信しました</div>
       <div class="resultsub" id="doneSub"></div>
-      <button class="again" id="againBtn">状況を更新する</button>
+      <div class="doneacts">
+        <a class="tomap" id="toMapBtn" href="map.html">地図でみんなの状況を見る</a>
+        <button class="again" id="againBtn">状況を更新する</button>
+      </div>
     </div>
   </div>
 
@@ -220,8 +228,8 @@
     $("#doneCheck").style.background = color;
     $("#doneLine").textContent = (name ? name + "さん：" : "") + "「" + (STATUS_JP[status]||"") + "」を共有しました";
     $("#doneSub").textContent = precise
-      ? "現在地つきで家族に共有しました。状況が変わったら更新できます。"
-      : ((pref ? pref + "として" : "") + "家族に共有しました。状況が変わったら更新できます。");
+      ? "現在地つきで家族に共有しました。みんなの状況は下の地図で確認できます。"
+      : ((pref ? pref + "として" : "") + "家族に共有しました。みんなの状況は下の地図で確認できます。");
     document.querySelectorAll("button.status").forEach(function(b){ b.disabled = false; });
     show("doneCard");
   }
