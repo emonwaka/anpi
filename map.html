@@ -42,6 +42,7 @@
   .quake{margin:12px 0 4px; border:1px solid #fed7aa; background:#fff7ed; border-radius:12px; padding:10px 12px; font-size:13px; color:#7c2d12; display:none}
   .quake b{color:#9a3412}
   .quake .areas{margin-top:6px; color:#9a3412; font-size:12px; line-height:1.5}
+  .quake .qrow{margin-top:5px; padding-top:5px; border-top:1px dashed #fed7aa; font-size:12px; color:#7c2d12}
   .demo-note{background:#fee2e2; border:1px solid #fecaca; color:#991b1b; font-weight:800; border-radius:8px; padding:6px 10px; margin-bottom:8px; font-size:12px}
   .shindo-legend{display:flex; flex-wrap:wrap; gap:6px 10px; margin-top:8px}
   .shindo-legend .sl{display:flex; align-items:center; gap:4px; font-size:11px; color:#475569; font-weight:700}
@@ -117,6 +118,8 @@
   const REFRESH_MS = 30000;  // 安否データの更新間隔
   const QUAKE_MS   = 60000;  // 地震情報の更新間隔
   const WINDOW_HOURS_DEFAULT = 48;       // doGet が値を返さない場合の既定の表示時間窓（時間）
+  const DISPLAY_MIN_SCALE = 40;          // 地図に表示する地震の最小震度（40=震度4）
+  const QUAKE_SHOW_HOURS  = 48;          // この時間内に発生した地震だけ表示（複数件まとめて表示）
   // ==================
 
   // 都道府県の代表点（県庁所在地・近似）。ピンはこの座標に置く。
@@ -169,7 +172,8 @@
 
   // ---- 都道府県ポリゴンの震度色分け（japan.geojson をリポジトリに配置）----
   let prefLayer = null;       // 県境ポリゴンのレイヤ
-  let curPerPrefMax = {};     // 直近地震の県別最大震度 { 県名: scale }
+  let curPerPrefMax = {};     // 表示中の全地震を横断した県別最大震度 { 県名: scale }
+  let curPrefEvents = {};     // 県ごとの寄与イベント { 県名: [{time, scale}] }（クリック時の内訳用）
   function prefNameOf(f){ const p = f.properties || {}; return p.nam_ja || p.name || p.N03_001 || ""; }
   function styleFeature(f){
     const s = curPerPrefMax[prefNameOf(f)];
@@ -184,9 +188,21 @@
           pane:"quakeFill", style: styleFeature,
           onEachFeature: function(f, layer){
             layer.on("click", function(){
-              const s = curPerPrefMax[prefNameOf(f)];
-              layer.bindPopup("<div class='pp-name'>"+esc(prefNameOf(f))+"</div>"+
-                (s ? "<div>最大"+scaleLabel(s)+"</div>" : "<div>観測なし</div>")).openPopup();
+              const name = prefNameOf(f), s = curPerPrefMax[name];
+              let html = "<div class='pp-name'>"+esc(name)+"</div>";
+              if(s){
+                html += "<div>最大"+scaleLabel(s)+"</div>";
+                // 複数の地震で揺れた県は、各地震ごとの内訳も表示（色は最大値）
+                const evs = (curPrefEvents[name]||[]).slice().sort(function(a,b){ return b.scale-a.scale; });
+                if(evs.length > 1){
+                  html += "<div class='meta'>"+evs.map(function(e){
+                    return esc(e.time)+"："+scaleLabel(e.scale);
+                  }).join("<br>")+"</div>";
+                }
+              } else {
+                html += "<div>観測なし</div>";
+              }
+              layer.bindPopup(html).openPopup();
             });
           }
         }).addTo(map);
@@ -394,56 +410,81 @@
   }];
 
   function loadQuake(){
-    if(DEMO_QUAKE){ renderQuake(DEMO_DATA, true); return; }
-    fetch("https://api.p2pquake.net/v2/history?codes=551&limit=1")
+    if(DEMO_QUAKE){ renderQuakes(DEMO_DATA, true); return; }
+    fetch("https://api.p2pquake.net/v2/history?codes=551&limit=30")
       .then(function(r){ return r.json(); })
-      .then(function(data){ renderQuake(data, false); })
+      .then(function(data){ renderQuakes(data, false); })
       .catch(function(){ /* 取得失敗時は何もしない */ });
   }
 
-  function renderQuake(data, isDemo){
-        quakeLayer.clearLayers();
-        if(!data || !data.length){ return; }
-        const q = data[0], eq = q.earthquake || {}, hypo = eq.hypocenter || {};
-        const name = hypo.name || "不明";
-        const mag  = hypo.magnitude;
-        const maxS = scaleLabel(eq.maxScale);
-        const depth = hypo.depth; // km（0=ごく浅い, -1=不明）
-        const depthTxt = (depth > 0) ? "深さ約"+depth+"km" : (depth === 0 ? "ごく浅い" : "");
+  // P2Pの発生時刻文字列（"YYYY/MM/DD HH:MM:SS"・JST）→ ミリ秒。失敗時 null。
+  function parseQuakeTime(s){ const t = new Date(String(s||"").replace(/-/g,"/")).getTime(); return isNaN(t) ? null : t; }
+  function depthText(h){ const d = h.depth; return (d>0) ? "深さ約"+d+"km" : (d===0 ? "ごく浅い" : ""); }
 
-        // 震度4以上の地域を抽出
-        const big = (q.points||[]).filter(function(p){ return p.scale>=40; })
-          .sort(function(a,b){ return b.scale-a.scale; })
-          .slice(0,10).map(function(p){ return p.addr+"（"+scaleLabel(p.scale)+"）"; });
+  function renderQuakes(data, isDemo){
+    quakeLayer.clearLayers();
+    const box = $("#quakeBox");
+    const legend = "<div class='shindo-legend'>" +
+      [10,20,30,40,45,50,55,60,70].map(function(s){
+        return "<span class='sl'><span class='slc' style='background:"+shindoColor(s)+"'></span>"+SCALE[s]+"</span>";
+      }).join("") + "</div>";
 
-        // バナー
-        const box = $("#quakeBox");
-        box.style.display = "block";
-        const legend = "<div class='shindo-legend'>" +
-          [10,20,30,40,45,50,55,60,70].map(function(s){
-            return "<span class='sl'><span class='slc' style='background:"+shindoColor(s)+"'></span>"+SCALE[s]+"</span>";
-          }).join("") + "</div>";
-        box.innerHTML = (isDemo ? "<div class='demo-note'>⚠ これはテスト表示です（実際の地震ではありません）</div>" : "")+
-          "<b>直近の地震</b>　"+esc(eq.time||"")+"<br>"+
-          "震源：<b>"+esc(name)+"</b>"+(mag?"（M"+esc(mag)+"）":"")+(depthTxt?"　"+esc(depthTxt):"")+"　最大<b>"+maxS+"</b>"+
-          (big.length?"<div class='areas'>震度4以上："+esc(big.join("、"))+"</div>":"")+
-          legend;
+    // 表示対象イベント：震度4以上 かつ 48時間以内（発生時刻で判断）。デモは全件。
+    const cutoff = Date.now() - QUAKE_SHOW_HOURS*3600*1000;
+    const events = (data||[]).filter(function(q){
+      const eq = q.earthquake||{};
+      if(isDemo) return true;
+      if(!(eq.maxScale >= DISPLAY_MIN_SCALE)) return false;
+      const t = parseQuakeTime(eq.time);
+      return t !== null && t >= cutoff;
+    }).sort(function(a,b){
+      return (parseQuakeTime((b.earthquake||{}).time)||0) - (parseQuakeTime((a.earthquake||{}).time)||0);
+    });
 
-        // 県ごとの震度色分け：points から県別の最大震度を出し、県ポリゴンを塗る
-        curPerPrefMax = {};
-        (q.points||[]).forEach(function(p){
-          if(!p.pref || typeof p.scale !== "number") return;
-          if(!(p.pref in curPerPrefMax) || p.scale > curPerPrefMax[p.pref]) curPerPrefMax[p.pref] = p.scale;
-        });
-        if(prefLayer) prefLayer.setStyle(styleFeature);
+    // 該当なし：色を消し、安心メッセージ
+    if(!events.length){
+      curPerPrefMax = {}; curPrefEvents = {};
+      if(prefLayer) prefLayer.setStyle(styleFeature);
+      box.style.display = "block";
+      box.innerHTML = "<b>地震情報</b><br>最近"+QUAKE_SHOW_HOURS+"時間に震度"+SCALE[DISPLAY_MIN_SCALE]+"以上の地震はありません。";
+      return;
+    }
 
-        // 震源は ✕ マーカーで表示（揺れの強弱は県の色分けで表す。目安円は廃止）
-        const lat = Number(hypo.latitude), lng = Number(hypo.longitude);
-        if(!isNaN(lat) && !isNaN(lng) && lat!==0){
-          const epiIcon = L.divIcon({ className:"", html:"<div class='epi'>✕</div>", iconSize:[24,24], iconAnchor:[12,12] });
-          L.marker([lat,lng], { icon:epiIcon, title:"震源" }).addTo(quakeLayer)
-            .bindPopup("<div class='pp-name'>震源："+esc(name)+"</div>"+(mag?"<div>M"+esc(mag)+"</div>":"")+(depthTxt?"<div>"+esc(depthTxt)+"</div>":"")+"<div>最大"+maxS+"</div>");
-        }
+    // 県ごとの最大震度を全イベント横断で集計＋寄与イベントを記録（かぶり対策）
+    curPerPrefMax = {}; curPrefEvents = {};
+    events.forEach(function(q){
+      const tlabel = (q.earthquake||{}).time || "";
+      (q.points||[]).forEach(function(p){
+        if(!p.pref || typeof p.scale !== "number") return;
+        if(!(p.pref in curPerPrefMax) || p.scale > curPerPrefMax[p.pref]) curPerPrefMax[p.pref] = p.scale;
+        (curPrefEvents[p.pref] = curPrefEvents[p.pref] || []).push({ time:tlabel, scale:p.scale });
+      });
+    });
+    if(prefLayer) prefLayer.setStyle(styleFeature);
+
+    // バナー：イベント一覧（新しい順・最大8件）
+    const shown = events.slice(0,8);
+    const rows = shown.map(function(q){
+      const eq=q.earthquake||{}, h=eq.hypocenter||{}, dt=depthText(h);
+      return "<div class='qrow'>"+esc(eq.time||"")+"　<b>"+esc(h.name||"不明")+"</b>"+
+        (h.magnitude?"（M"+esc(h.magnitude)+"）":"")+(dt?"　"+esc(dt):"")+"　最大<b>"+scaleLabel(eq.maxScale)+"</b></div>";
+    }).join("");
+    box.style.display = "block";
+    box.innerHTML = (isDemo ? "<div class='demo-note'>⚠ これはテスト表示です（実際の地震ではありません）</div>" : "")+
+      "<b>直近"+QUAKE_SHOW_HOURS+"時間の地震（震度"+SCALE[DISPLAY_MIN_SCALE]+"以上）"+events.length+"件</b>"+
+      rows + (events.length>shown.length ? "<div class='qrow'>…ほか"+(events.length-shown.length)+"件</div>" : "")+
+      legend;
+
+    // 震源 ✕ マーカー（各イベント）
+    events.forEach(function(q){
+      const eq=q.earthquake||{}, h=eq.hypocenter||{}, dt=depthText(h);
+      const lat=Number(h.latitude), lng=Number(h.longitude);
+      if(isNaN(lat)||isNaN(lng)||lat===0) return;
+      const epiIcon = L.divIcon({ className:"", html:"<div class='epi'>✕</div>", iconSize:[24,24], iconAnchor:[12,12] });
+      L.marker([lat,lng], { icon:epiIcon, title:"震源" }).addTo(quakeLayer)
+        .bindPopup("<div class='pp-name'>震源："+esc(h.name||"不明")+"</div><div class='meta'>"+esc(eq.time||"")+"</div>"+
+          (h.magnitude?"<div>M"+esc(h.magnitude)+"</div>":"")+(dt?"<div>"+esc(dt)+"</div>":"")+"<div>最大"+scaleLabel(eq.maxScale)+"</div>");
+    });
   }
 
   // ---------- 起動・自動更新 ----------
