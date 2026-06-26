@@ -101,7 +101,7 @@
 
     <div class="src">
       震源・震度データ：<a href="https://www.p2pquake.net/develop/json_api_v2/" target="_blank" rel="noopener">P2P地震情報 API</a>
-      （<code>api.p2pquake.net/v2/history?codes=551</code>）<br>
+      （<code>api.p2pquake.net/v2/jma/quake?min_scale=40</code>）<br>
       地図：地理院タイル（国土地理院）／ 震度色は気象庁配色に準拠した目安
     </div>
   </div>
@@ -411,7 +411,8 @@
 
   function loadQuake(){
     if(DEMO_QUAKE){ renderQuakes(DEMO_DATA, true); return; }
-    fetch("https://api.p2pquake.net/v2/history?codes=551&limit=30")
+    // 震度4以上(min_scale)の地震だけを新しい順(order=-1)に直近20件取得（小さな地震で押し出されない）
+    fetch("https://api.p2pquake.net/v2/jma/quake?min_scale=" + DISPLAY_MIN_SCALE + "&limit=20&order=-1")
       .then(function(r){ return r.json(); })
       .then(function(data){ renderQuakes(data, false); })
       .catch(function(){ /* 取得失敗時は何もしない */ });
