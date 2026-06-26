@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>安否確認マップ</title>
+<!-- ホーム画面アプリ化（PWA）：地図を初期画面として開く -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="安否マップ">
+<link rel="apple-touch-icon" href="icon.svg">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 <style>
@@ -35,6 +43,9 @@
   .refresh{margin-left:auto; background:#0f172a; color:#fff; border:0; border-radius:9px; padding:6px 10px; font:inherit; font-size:12px; font-weight:700; cursor:pointer}
   .ptop-btns{display:flex; gap:6px; flex:0 0 auto}
   .toggle{background:#fff; color:#0f172a; border:1px solid var(--line); border-radius:9px; padding:6px 10px; font:inherit; font-size:12px; font-weight:700; cursor:pointer}
+  .report-cta{display:block; margin-top:12px; background:#16a34a; color:#fff; text-decoration:none; text-align:center; padding:13px 16px; border-radius:12px; font-weight:800; font-size:15px}
+  .report-cta:hover{background:#15803d}
+  .report-cta:focus-visible{outline:4px solid #1e293b; outline-offset:2px}
   /* 折りたたみ時：名簿・地震詳細・出典を隠し、地図を広げる（モバイルの縦並びのみ） */
   #panel.collapsed .quake, #panel.collapsed .roster, #panel.collapsed .src{display:none}
   @media (min-width:820px){ .toggle{display:none} }
@@ -93,6 +104,8 @@
       </div>
     </div>
 
+    <a class="report-cta" id="reportBtn" href="report.html">✏️ 自分の状況を報告する</a>
+
     <div class="quake" id="quakeBox"></div>
 
     <div class="summary" id="summary"></div>
@@ -149,7 +162,14 @@
   };
   const NONE = { jp:"未回答", color:"#94a3b8", cls:"none", pri:2 };
   // 閲覧者の専用id（自分とグループが重なる人だけ表示される）。report.html の「地図で見る」から付与。
-  const VIEWER_ID = (new URLSearchParams(location.search).get("id") || "").trim();
+  // ホーム画面アプリで id 無しで起動された場合に備え、一度開いた id を localStorage に記憶。
+  const VIEWER_ID = (function(){
+    const u = (new URLSearchParams(location.search).get("id") || "").trim();
+    try {
+      if(u){ localStorage.setItem("anpi_id", u); return u; }
+      return (localStorage.getItem("anpi_id") || "").trim();
+    } catch(e){ return u; }
+  })();
   const SCALE = {10:"1",20:"2",30:"3",40:"4",45:"5弱",50:"5強",55:"6弱",60:"6強",70:"7"};
   // 震度カラー（JMA配色に近い目安）。県ごとの色分けに使用。
   const SHINDO_COLOR = {10:"#C7CCD1",20:"#7AB8F5",30:"#69C2A3",40:"#F0E150",45:"#F5A742",50:"#F07B26",55:"#E14B3B",60:"#C0203A",70:"#8B1A8B"};
@@ -509,6 +529,8 @@
   }
 
   // ---------- 起動・自動更新 ----------
+  // 「自分の状況を報告する」ボタンは、自分の id を付けて報告フォームへ
+  $("#reportBtn").href = "report.html" + (VIEWER_ID ? "?id=" + encodeURIComponent(VIEWER_ID) : "");
   $("#refreshBtn").addEventListener("click", function(){ loadData(); loadQuake(); });
   $("#toggleBtn").addEventListener("click", function(){
     const collapsed = $("#panel").classList.toggle("collapsed");
