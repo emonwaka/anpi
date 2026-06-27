@@ -64,6 +64,8 @@
   .b-minor{background:var(--minor)} .b-minor:hover{background:var(--minor-d)}
   .b-help{background:var(--help)}   .b-help:hover{background:var(--help-d)}
 
+  .maplink{display:block; margin-top:16px; text-align:center; font-size:13px; font-weight:700; color:#2563eb; text-decoration:none}
+  .maplink:hover{text-decoration:underline}
   .foot{margin-top:18px; font-size:12px; color:var(--muted); text-align:center}
 
   /* 状態表示 */
@@ -111,6 +113,7 @@
         <span class="dot"></span><span class="txt"><span class="big">助けが必要</span><span class="sub">支援・救助を求めています</span></span>
       </button>
     </div>
+    <a class="maplink" id="toMapForm" href="map.html">🗺 報告せずに、みんなの状況（地図）を見る</a>
   </div>
 
   <!-- 送信中 -->
@@ -153,8 +156,10 @@
 
   const PREF_LIST = ["北海道","青森県","岩手県","宮城県","秋田県","山形県","福島県","茨城県","栃木県","群馬県","埼玉県","千葉県","東京都","神奈川県","新潟県","富山県","石川県","福井県","山梨県","長野県","岐阜県","静岡県","愛知県","三重県","滋賀県","京都府","大阪府","兵庫県","奈良県","和歌山県","鳥取県","島根県","岡山県","広島県","山口県","徳島県","香川県","愛媛県","高知県","福岡県","佐賀県","長崎県","熊本県","大分県","宮崎県","鹿児島県","沖縄県"];
 
+  // id は URL の ?id= を優先。ホーム画面アプリで id 無しで起動された場合は localStorage から復元。
   const params = new URLSearchParams(location.search);
-  const id = (params.get("id") || "").trim();
+  let id = (params.get("id") || "").trim();
+  if(!id){ try { id = (localStorage.getItem("anpi_id") || "").trim(); } catch(e){} }
 
   const $ = (s)=>document.querySelector(s);
 
@@ -178,8 +183,9 @@
   } else {
     show("formCard");
     try { localStorage.setItem("anpi_id", id); } catch(e){} // ホーム画面アプリが id を記憶
-    // 地図は自分専用リンク（自分とグループが重なる人だけ表示される）
+    // 地図リンク（完了画面・フォーム画面とも）。地図側は別途Googleログインが必要。
     $("#toMapBtn").href = "map.html?id=" + encodeURIComponent(id);
+    $("#toMapForm").href = "map.html?id=" + encodeURIComponent(id);
     // 名前で呼びかけ＆登録県をプルダウンの初期値に（取れなくてもボタンは使える）
     fetch(GAS_URL + "?type=member&id=" + encodeURIComponent(id))
       .then(function(r){return r.json();})
